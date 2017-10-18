@@ -21,22 +21,27 @@
  *   Software.
  */
 
+#![no_std]
+
+extern crate containers;
+
+use core::iter::repeat;
+use containers::collections::Vec;
+use cplx::Complex;
+
 
 /* 
  * Computes the discrete Fourier transform (DFT) of the given complex vector, storing the result back into the vector.
  * The vector can have any length. This is a wrapper function.
  */
-pub fn transform(real: &mut [f64], imag: &mut [f64]) {
-	let n: usize = real.len();
-	if n != imag.len() {
-		panic!("Mismatched lengths");
-	}
+pub fn transform(xs: &mut [Complex<f64>]) {
+	let n: usize = xs.len();
 	if n == 0 {
 		return;
 	} else if n & (n - 1) == 0 {  // Is power of 2
-		transform_radix2(real, imag);
+		transform_radix2(xs);
 	} else {  // More complicated algorithm for arbitrary sizes
-		transform_bluestein(real, imag);
+		transform_bluestein(xs);
 	}
 }
 
@@ -45,16 +50,28 @@ pub fn transform(real: &mut [f64], imag: &mut [f64]) {
  * Computes the inverse discrete Fourier transform (IDFT) of the given complex vector, storing the result back into the vector.
  * The vector can have any length. This is a wrapper function. This transform does not perform scaling, so the inverse is not a true inverse.
  */
-pub fn inverse_transform(real: &mut [f64], imag: &mut [f64]) {
-	transform(imag, real);
+pub fn inverse_transform(xs: &mut [Complex<f64>]) {
+        for x in xs.iter_mut() { let (a, b) = x.to_rect(); *x = Complex::from_rect(b, a) }
+	transform(xs);
+        for x in xs.iter_mut() { let (a, b) = x.to_rect(); *x = Complex::from_rect(b, a) }
 }
 
+mod c_math {
+    #[link(name = "m")]
+    extern {
+        pub fn sin(_: f64) -> f64;
+        pub fn cos(_: f64) -> f64;
+    }
+}
+
+fn sin(x: f64) -> f64 { unsafe { c_math::sin(x) } }
+fn cos(x: f64) -> f64 { unsafe { c_math::cos(x) } }
 
 /* 
  * Computes the discrete Fourier transform (DFT) of the given complex vector, storing the result back into the vector.
  * The vector's length must be a power of 2. Uses the Cooley-Tukey decimation-in-time radix-2 algorithm.
  */
-pub fn transform_radix2(real: &mut [f64], imag: &mut [f64]) {
+pub fn transform_radix2(xs: &mut [Complex<f64>]) {
 	// Length variables
 	let n: usize = real.len();
 	if n != imag.len() {
@@ -66,12 +83,12 @@ pub fn transform_radix2(real: &mut [f64], imag: &mut [f64]) {
 	}
 	
 	// Trigonometric tables
-	let mut costable: Vec<f64> = Vec::with_capacity(n / 2);
-	let mut sintable: Vec<f64> = Vec::with_capacity(n / 2);
+	let mut costable: Vec<f64> = Vec::with_capacity(n / 2).unwrap();
+	let mut sintable: Vec<f64> = Vec::with_capacity(n / 2).unwrap();
 	for i in 0 .. n / 2 {
-		let angle: f64 = 2.0 * std::f64::consts::PI * (i as f64) / (n as f64);
-		costable.push(angle.cos());
-		sintable.push(angle.sin());
+		let angle: f64 = 2.0 * core::f64::consts::PI * (i as f64) / (n as f64);
+		costable.push(cos(angle)).unwrap();
+		sintable.push(sin(angle)).unwrap();
 	}
 	
 	fn reverse_bits(mut x: usize, n: u32) -> usize {
@@ -140,29 +157,29 @@ pub fn transform_bluestein(real: &mut [f64], imag: &mut [f64]) {
 	}
 	
 	// Trignometric tables
-	let mut costable: Vec<f64> = Vec::with_capacity(n);
-	let mut sintable: Vec<f64> = Vec::with_capacity(n);
+	let mut costable: Vec<f64> = Vec::with_capacity(n).unwrap();
+	let mut sintable: Vec<f64> = Vec::with_capacity(n).unwrap();
 	for i in 0 .. n {
 		  // This is more accurate than j = i * i
 		let j: u64 = (i as u64) * (i as u64) % ((n as u64) * 2);
-		let angle: f64 = std::f64::consts::PI * (j as f64) / (n as f64);
-		costable.push(angle.cos());
-		sintable.push(angle.sin());
+		let angle: f64 = core::f64::consts::PI * (j as f64) / (n as f64);
+		costable.push(cos(angle)).unwrap();
+		sintable.push(sin(angle)).unwrap();
 	}
 	
 	// Temporary vectors and preprocessing
-	let mut areal: Vec<f64> = Vec::with_capacity(m);
-	let mut aimag: Vec<f64> = Vec::with_capacity(m);
+	let mut areal: Vec<f64> = Vec::with_capacity(m).unwrap();
+	let mut aimag: Vec<f64> = Vec::with_capacity(m).unwrap();
 	for i in 0 .. n {
-		areal.push( real[i] * costable[i] + imag[i] * sintable[i]);
-		aimag.push(-real[i] * sintable[i] + imag[i] * costable[i]);
+		areal.push( real[i] * costable[i] + imag[i] * sintable[i]).unwrap();
+		aimag.push(-real[i] * sintable[i] + imag[i] * costable[i]).unwrap();
 	}
 	for _ in n .. m {
-		areal.push(0.0);
-		aimag.push(0.0);
+		areal.push(0.0).unwrap();
+		aimag.push(0.0).unwrap();
 	}
-	let mut breal: Vec<f64> = vec![0.0; m];
-	let mut bimag: Vec<f64> = vec![0.0; m];
+	let mut breal: Vec<f64> = vec_of(0.0, m).unwrap();
+	let mut bimag: Vec<f64> = vec_of(0.0, m).unwrap();
 	breal[0] = costable[0];
 	bimag[0] = sintable[0];
 	for i in 1 .. n {
@@ -173,8 +190,8 @@ pub fn transform_bluestein(real: &mut [f64], imag: &mut [f64]) {
 	}
 	
 	// Convolution
-	let mut creal: Vec<f64> = vec![0.0; m];
-	let mut cimag: Vec<f64> = vec![0.0; m];
+	let mut creal: Vec<f64> = vec_of(0.0, m).unwrap();
+	let mut cimag: Vec<f64> = vec_of(0.0, m).unwrap();
 	convolve_complex(&areal, &aimag, &breal, &bimag, &mut creal, &mut cimag);
 	
 	// Postprocessing
@@ -193,7 +210,7 @@ pub fn convolve_real(x: &[f64], y: &[f64], out: &mut [f64]) {
 	if n != y.len() || n != out.len() {
 		panic!("Mismatched lengths");
 	}
-	convolve_complex(x, &mut vec![0.0; n], y, &mut vec![0.0; n], out, &mut vec![0.0; n]);
+	convolve_complex(x, &mut vec_of(0.0, n).unwrap(), y, &mut vec_of(0.0, n).unwrap(), out, &mut vec_of(0.0, n).unwrap());
 }
 
 
@@ -209,10 +226,10 @@ pub fn convolve_complex(xreal: &[f64], ximag: &[f64], yreal: &[f64], yimag: &[f6
 		panic!("Mismatched lengths");
 	}
 	
-	let mut xrecp: Vec<f64> = xreal.to_vec();
-	let mut ximcp: Vec<f64> = ximag.to_vec();
-	let mut yrecp: Vec<f64> = yreal.to_vec();
-	let mut yimcp: Vec<f64> = yimag.to_vec();
+	let mut xrecp: Vec<f64> = Vec::from_iter(xreal.iter().cloned()).unwrap();
+	let mut ximcp: Vec<f64> = Vec::from_iter(ximag.iter().cloned()).unwrap();
+	let mut yrecp: Vec<f64> = Vec::from_iter(yreal.iter().cloned()).unwrap();
+	let mut yimcp: Vec<f64> = Vec::from_iter(yimag.iter().cloned()).unwrap();
 	transform(&mut xrecp, &mut ximcp);
 	transform(&mut yrecp, &mut yimcp);
 	
@@ -228,3 +245,5 @@ pub fn convolve_complex(xreal: &[f64], ximag: &[f64], yreal: &[f64], yimag: &[f6
 		outimag[i] = ximcp[i] / (n as f64);
 	}
 }
+
+fn vec_of<T: Clone>(x: T, n: usize) -> Option<Vec<T>> { Vec::from_iter(repeat(x).take(n)).ok() }

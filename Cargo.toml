@@ -2,3 +2,6 @@
 name = "fourier"
 version = "0.1.0"
 authors = ["M Farkas-Dyck <strake888@gmail.com>"]
+
+[dependencies]
+containers = "0.6"
